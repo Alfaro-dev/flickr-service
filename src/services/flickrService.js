@@ -1,5 +1,4 @@
 const axios = require('axios'); // Axios para hacer solicitudes HTTP
-const redisClient = require('../cache'); // Redis para el caché
 
 /**
  * Obtiene el feed de Flickr con soporte de caché.
