@@ -1,7 +1,7 @@
 const express = require('express');
 require('dotenv').config();
 
-const app = express();
+const app = require('./app');
 
 // Middleware global para agregar encabezados CORS
 app.use((req, res, next) => {
