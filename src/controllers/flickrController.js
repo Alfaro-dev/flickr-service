@@ -1,4 +1,4 @@
-const { getFlickrFeed } = require('../services/flickrService');
+const { getFlickrFeed, getFlickrPhotoById } = require('../services/flickrService');
 
 const getFlickrPhotos = async (req, res) => {
   const { search, tags, sort, per_page, page } = req.query;
@@ -13,6 +13,20 @@ const getFlickrPhotos = async (req, res) => {
   }
 };
 
+const getFlickrPhoto = async (req, res) => {
+  const { id } = req.params;
+
+  const user = req.user || null;
+
+  try {
+    const photo = await getFlickrPhotoById(id, user);
+    res.status(200).json(photo);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch photo details' });
+  }
+};
+
 module.exports = {
   getFlickrPhotos,
+  getFlickrPhoto,
 };

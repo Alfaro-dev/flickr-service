@@ -114,6 +114,122 @@ const getFlickrFeed = async (queryParams, user) => {
   }
 };
 
+const getFlickrPhotoById = async (photoId, user) => {
+  const cacheKey = `photo:${photoId}`;
+
+  // Intenta recuperar los datos del caché
+  // try {
+  //   const cachedData = await redisClient.get(cacheKey);
+
+  //   if (cachedData) {
+  //     console.log('Cache hit:', cacheKey);
+  //     return JSON.parse(cachedData);
+  //   }
+  // } catch (error) {
+  //   console.error('Error accediendo a Redis:', error.message);
+  // }
+
+  try {
+    // Configuración para obtener los detalles de la foto
+    const photoDetailsConfig = {
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://api.flickr.com/services/rest',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'PostmanRuntime/7.42.0',
+      },
+      params: {
+        method: 'flickr.photos.getInfo',
+        api_key: process.env.FLICKR_API_KEY,
+        photo_id: photoId,
+        format: 'json',
+        nojsoncallback: 1,
+      },
+    };
+
+    // Configuración para obtener los comentarios de la foto
+    const commentsConfig = {
+      method: 'get',
+      url: 'https://api.flickr.com/services/rest',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'PostmanRuntime/7.42.0',
+      },
+      params: {
+        method: 'flickr.photos.comments.getList',
+        api_key: process.env.FLICKR_API_KEY,
+        photo_id: photoId,
+        format: 'json',
+        nojsoncallback: 1,
+      },
+    };
+
+    // Realiza las solicitudes en paralelo
+    const [photoResponse, commentsResponse] = await Promise.all([
+      axios.request(photoDetailsConfig),
+      axios.request(commentsConfig),
+    ]);
+
+    console.log('Photo response:', photoResponse.data);
+
+    const photo = photoResponse.data.photo;
+    const comments = commentsResponse.data.comments.comment || [];
+
+    // Formateamos los detalles de la foto
+    const formattedPhoto = {
+      id: photo.id,
+      title: photo.title._content,
+      description: photo.description._content,
+      media: photo.urls.url[0]._content,
+      date_taken: photo.dates.taken,
+      published: photo.dates.posted,
+      author: photo.owner.realname || photo.owner.username,
+      views: photo.views,
+      tags: photo.tags.tag.map((tag) => tag.raw),
+      comments: comments.map((comment) => ({
+        id: comment.id,
+        author: comment.authorname,
+        content: comment._content,
+        date_created: comment.datecreate,
+      })),
+    };
+
+    // Guarda los datos en Redis por 10 minutos
+    try {
+      await redisClient.set(cacheKey, JSON.stringify(formattedPhoto), { EX: 600 });
+      console.log('Cache actualizado:', cacheKey);
+    } catch (error) {
+      console.error('Error guardando en Redis:', error.message);
+    }
+
+    // Si el usuario está autenticado, guarda la acción en el History
+    if (user) {
+      try {
+        await History.create({
+          userId: user.id,
+          action: 'view',
+          value: photoId,
+          entity: 'FlickrPhoto',
+          entityId: photoId,
+          createdBy: user.id,
+        });
+        console.log('History actualizado.');
+      } catch (error) {
+        console.error('Error al guardar el History:', error.message);
+      }
+    }
+
+    return formattedPhoto;
+  } catch (error) {
+    console.error('Error fetching photo from Flickr:', error.message);
+    throw new Error('Failed to fetch photo from Flickr API');
+  }
+};
+
 module.exports = {
   getFlickrFeed,
+  getFlickrPhotoById,
 };

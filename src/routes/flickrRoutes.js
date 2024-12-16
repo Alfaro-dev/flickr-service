@@ -6,5 +6,6 @@ const router = express.Router();
 
 
 router.get('/', optionalAuthMiddleware, flickrController.getFlickrPhotos);
+router.get('/:id', optionalAuthMiddleware, flickrController.getFlickrPhoto);
 
 module.exports = router;
