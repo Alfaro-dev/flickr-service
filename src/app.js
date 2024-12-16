@@ -6,6 +6,14 @@ const flickrRoutes = require('./routes/flickrRoutes');
 
 const app = express();
 
+// Middleware global para agregar encabezados CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*'); // Permitir cualquier origen
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  next();
+});
+
 // Middleware para analizar JSON
 app.use(express.json());
 
