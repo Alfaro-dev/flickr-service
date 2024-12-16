@@ -1,9 +1,9 @@
 {
   "development": {
-    "username": "postgres",
-    "password": "password",
-    "database": "user_db",
-    "host": "user-db",
+    "username": "user_db_sqkp_user",
+    "password": "XArxTlV6BCHev7nciWstkBAFU3HawYkN",
+    "database": "user_db_sqkp",
+    "host": "dpg-ctflkmlumphs73eblv30-a",
     "dialect": "postgres"
   },
   "test": {
