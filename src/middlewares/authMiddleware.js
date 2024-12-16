@@ -23,7 +23,16 @@ const authMiddleware = async (req, res, next) => {
 
     // Buscamos el usuario en la base de datos
     const user = await User.findByPk(userId, {
-      include: ['Roles'], // Asumiendo que hay una relación con Roles
+      include: [
+        'Roles', // Relación con Roles (sin filtro)
+        {
+          association: 'Histories', // Relación con Histories
+          where: {
+            entity: 'FlickrFeed' // Filtra solo los historiales con la entidad "FlickrFeed"
+          },
+          required: false // Esto asegura que si no hay historiales, el usuario aún se devuelve
+        }
+      ]
     });
 
     if (!user) {

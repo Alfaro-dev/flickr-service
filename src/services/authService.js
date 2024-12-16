@@ -1,4 +1,4 @@
-const { User, Role, UserRoles, Permission } = require('../models');
+const { User, Role, Permission } = require('../models');
 const { hashPassword, verifyPassword, signToken } = require('../utils/jwt');
 
 /**

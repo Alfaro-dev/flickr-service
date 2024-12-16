@@ -8,6 +8,10 @@ module.exports = (sequelize, DataTypes) => {
         through: models.UserRoles, 
         foreignKey: 'userId' 
       });
+
+      User.hasMany(models.History, { 
+        foreignKey: 'userId' 
+      });
     }
   }
   
