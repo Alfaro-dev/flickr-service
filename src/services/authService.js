@@ -9,7 +9,7 @@ const { hashPassword, verifyPassword, signToken } = require('../utils/jwt');
 const register = async (args) => {
     const hashedPassword = await hashPassword(args.password)
 
-    const user = User.create({
+    const user = await User.create({
         ...args,
         password: hashedPassword
     })
@@ -17,10 +17,7 @@ const register = async (args) => {
     // add role to user, default is Suscriber
     const role = await Role.findOne({ where: { name: 'Suscriber' } })
     
-    await UserRoles.create({
-        userId: user.id,
-        roleId: role.id
-    })
+    user.addRole(role);
 
     return user
 }
@@ -32,7 +29,7 @@ const register = async (args) => {
  */
 const login = async ({ email, password }) => {
     // get user by email
-    const user = await User.findOne({ where: { email: email } });
+    const user = await User.scope('withPassword').findOne({ where: { email: email } });
 
     if (!user) {
         throw new Error("Invalid email");
@@ -48,11 +45,15 @@ const login = async ({ email, password }) => {
     }
 
     const token = signToken({ userId: user.id })
-  
+
+    // Eliminar el campo `password` antes de retornar el usuario
+    const userWithoutPassword = user.toJSON(); // Convierte el usuario a un objeto plano
+    delete userWithoutPassword.password;
+
     return {
-      user: user,
-      token: token
-    }
+      user: userWithoutPassword,
+      token: token,
+    };
 }
 
 /**
