@@ -2,7 +2,7 @@ const axios = require('axios');
 const { History } = require('../models'); // History model
 const redisClient = require('../config/redisConfig'); // Redis client
 
-const FLICKR_API_URL = process.env.FLICKR_BASE_URL;
+const FLICKR_API_URL = process.env.FLICKR_API_URL;
 const FLICKR_API_KEY = process.env.FLICKR_API_KEY;
 
 /**
@@ -28,8 +28,9 @@ const getFlickrFeed = async (queryParams, user) => {
   }
 
   try {
+    console.log('query params:', search, tags, sort, per_page, page);
     // Flickr API request configuration
-    const config = createFlickrConfig('flickr.photos.search', {
+    const config = createFlickrConfig('flickr.photos.getRecent', {
       sort,
       per_page,
       page,
@@ -40,6 +41,8 @@ const getFlickrFeed = async (queryParams, user) => {
 
     // Fetch photos from Flickr
     const response = await axios.request(config);
+
+    console.log('Flickr API response:', response.data);
 
     const pagination = {
       page: response.data.photos.page,
