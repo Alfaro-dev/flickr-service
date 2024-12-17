@@ -1,75 +1,53 @@
 const axios = require('axios');
-const { History } = require('../models'); // Modelo de History
-const redisClient = require('../config/redisConfig'); // Cliente Redis configurado
-const { date } = require('joi');
+const { History } = require('../models'); // History model
+const redisClient = require('../config/redisConfig'); // Redis client
+
+const BASE_FLICKR_URL = process.env.FLICKR_BASE_URL;
+const FLICKR_API_KEY = process.env.FLICKR_API_KEY;
 
 /**
- * Obtiene el feed de Flickr con soporte de caché y guarda las búsquedas en el History del usuario autenticado.
- * @param {object} queryParams - Parámetros para la consulta.
- * @param {object} user - Usuario autenticado (opcional).
- * @returns {Promise<object>} - Los datos del feed de Flickr.
+ * Fetches Flickr photos based on search parameters, with Redis caching and optional history logging.
+ * @param {object} queryParams - Query parameters for search (tags, sort, pagination).
+ * @param {object} user - Authenticated user (optional).
+ * @returns {Promise<object>} - Paginated Flickr photo data.
  */
 const getFlickrFeed = async (queryParams, user) => {
   const { search, tags, sort = 'relevance', per_page = 50, page = 1 } = queryParams;
 
-  const cacheKey = `${search || 'all'}:${tags || 'all'}:${sort}:${per_page}:${page}`;
+  const cacheKey = `${search || 'search-all'}:${tags || 'tag-all'}:${sort}:${per_page}:${page}`;
 
-  // Intenta recuperar los datos del caché
+  // Attempt to retrieve from Redis cache
   try {
     const cachedData = await redisClient.get(cacheKey);
-
     if (cachedData) {
       console.log('Cache hit:', cacheKey);
       return JSON.parse(cachedData);
     }
   } catch (error) {
-    console.error('Error accediendo a Redis:', error.message);
+    console.error('Error accessing Redis:', error.message);
   }
 
   try {
-    // Configuración para la solicitud HTTP
-    const config = {
-      method: 'get',
-      maxBodyLength: Infinity,
-      url: 'https://api.flickr.com/services/rest',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'PostmanRuntime/7.42.0',
-      },
-      params: {
-        method: 'flickr.photos.search',         // Método de la API
-        api_key: process.env.FLICKR_API_KEY,    // Clave de API desde el .env
-        format: 'json',                         // Formato de respuesta
-        nojsoncallback: 1,                      // Respuesta JSON pura
-        sort: sort || 'relevance',              // Orden de los resultados (por relevancia por defecto)
-        parse_tags: 1,                          // Interpretar etiquetas para mejorar precisión
-        content_type: 7,                        // Tipo de contenido (7 por defecto: todos los tipos)
-        per_page: per_page || 50,               // Número de resultados por página (50 por defecto)
-        page: page || 1,                        // Página actual (1 por defecto)
-        lang: 'en-US',    
-        text: search,                      // Idioma de la respuesta
-        tags: tags || '',                       // Texto o etiquetas a buscar (vacío por defecto)
-        extras: [                               // Campos adicionales en la respuesta
-          'description',
-          'date_upload',
-          'date_taken',
-          'owner_name',
-          'tags',
-          'views',
-          'url_m'
-        ].join(','),                            // Lista de campos separados por comas
-        csrf: '',                               // Token CSRF (vacío por defecto)
-        hermes: 1,                              // Configuración interna de Flickr
-        hermesClient: 1,                        // Configuración interna de Flickr
-        reqId: 'f866abd5'                       // ID único de solicitud (puedes generar uno dinámico si es necesario)
-      }
-    };
+    // Flickr API request configuration
+    const config = createFlickrConfig('flickr.photos.search', {
+      sort,
+      per_page,
+      page,
+      tags: tags || '',
+      text: search,
+      extras: 'description,date_upload,date_taken,owner_name,tags,views,url_m',
+    });
 
-    // Realiza la solicitud a la API de Flickr
+    // Fetch photos from Flickr
     const response = await axios.request(config);
 
-    // Procesa las fotos del feed
+    const pagination = {
+      page: response.data.photos.page,
+      pages: response.data.photos.pages,
+      perpage: response.data.photos.perpage,
+      total: response.data.photos.total,
+    };
+
     const photos = response.data.photos.photo.map((item) => ({
       id: item.id,
       title: item.title,
@@ -79,106 +57,56 @@ const getFlickrFeed = async (queryParams, user) => {
       published: item.date_upload,
       author: item.ownername,
       views: item.views,
-      tags: item.tags?.split(' ') || []
+      tags: item.tags?.split(' ').filter(tag => tag) || [],
     }));
 
-    // Guarda los datos en Redis por 10 minutos
-    try {
-      await redisClient.set(cacheKey, JSON.stringify(photos), { EX: 600 });
-      console.log('Cache actualizado:', cacheKey);
-    } catch (error) {
-      console.error('Error guardando en Redis:', error.message);
+    const result = { pagination, photos };
+
+    // Save to Redis cache
+    await saveToCache(cacheKey, result);
+
+    // Log to History if the user is authenticated
+    if (user && (search || tags)) {
+      await saveToHistory(user, search ? 'search' : 'tags', queryParams, 'FlickrFeed', null);
     }
 
-    // Si el usuario está autenticado, guarda la búsqueda en el History
-    if (user) {
-      try {
-        await History.create({
-          userId: user.id,
-          action: 'search',
-          value: JSON.stringify(queryParams),
-          entity: 'FlickrFeed',
-          entityId: null, // No se asocia a un ID específico en este caso
-          createdBy: user.id,
-        });
-        console.log('History actualizado.');
-      } catch (error) {
-        console.error('Error al guardar el History:', error.message);
-      }
-    }
-
-    return photos;
+    return result;
   } catch (error) {
     console.error('Error fetching data from Flickr:', error.message);
     throw new Error('Failed to fetch data from Flickr API');
   }
 };
 
+/**
+ * Fetches details for a specific Flickr photo, including comments, with Redis caching and optional history logging.
+ * @param {string} photoId - ID of the photo.
+ * @param {object} user - Authenticated user (optional).
+ * @returns {Promise<object>} - Photo details and comments.
+ */
 const getFlickrPhotoById = async (photoId, user) => {
   const cacheKey = `photo:${photoId}`;
 
-  // Intenta recuperar los datos del caché
-  // try {
-  //   const cachedData = await redisClient.get(cacheKey);
-
-  //   if (cachedData) {
-  //     console.log('Cache hit:', cacheKey);
-  //     return JSON.parse(cachedData);
-  //   }
-  // } catch (error) {
-  //   console.error('Error accediendo a Redis:', error.message);
-  // }
+  // Attempt to retrieve from Redis cache
+  try {
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit:', cacheKey);
+      return JSON.parse(cachedData);
+    }
+  } catch (error) {
+    console.error('Error accessing Redis:', error.message);
+  }
 
   try {
-    // Configuración para obtener los detalles de la foto
-    const photoDetailsConfig = {
-      method: 'get',
-      maxBodyLength: Infinity,
-      url: 'https://api.flickr.com/services/rest',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'PostmanRuntime/7.42.0',
-      },
-      params: {
-        method: 'flickr.photos.getInfo',
-        api_key: process.env.FLICKR_API_KEY,
-        photo_id: photoId,
-        format: 'json',
-        nojsoncallback: 1,
-      },
-    };
-
-    // Configuración para obtener los comentarios de la foto
-    const commentsConfig = {
-      method: 'get',
-      url: 'https://api.flickr.com/services/rest',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'PostmanRuntime/7.42.0',
-      },
-      params: {
-        method: 'flickr.photos.comments.getList',
-        api_key: process.env.FLICKR_API_KEY,
-        photo_id: photoId,
-        format: 'json',
-        nojsoncallback: 1,
-      },
-    };
-
-    // Realiza las solicitudes en paralelo
+    // Fetch photo details and comments in parallel
     const [photoResponse, commentsResponse] = await Promise.all([
-      axios.request(photoDetailsConfig),
-      axios.request(commentsConfig),
+      axios.request(createFlickrConfig('flickr.photos.getInfo', { photo_id: photoId })),
+      axios.request(createFlickrConfig('flickr.photos.comments.getList', { photo_id: photoId })),
     ]);
-
-    console.log('Photo response:', photoResponse.data);
 
     const photo = photoResponse.data.photo;
     const comments = commentsResponse.data.comments.comment || [];
 
-    // Formateamos los detalles de la foto
     const formattedPhoto = {
       id: photo.id,
       title: photo.title._content,
@@ -197,35 +125,80 @@ const getFlickrPhotoById = async (photoId, user) => {
       })),
     };
 
-    // Guarda los datos en Redis por 10 minutos
-    try {
-      await redisClient.set(cacheKey, JSON.stringify(formattedPhoto), { EX: 600 });
-      console.log('Cache actualizado:', cacheKey);
-    } catch (error) {
-      console.error('Error guardando en Redis:', error.message);
-    }
+    // Save to Redis cache
+    await saveToCache(cacheKey, formattedPhoto);
 
-    // Si el usuario está autenticado, guarda la acción en el History
+    // Log to History if the user is authenticated
     if (user) {
-      try {
-        await History.create({
-          userId: user.id,
-          action: 'view',
-          value: photoId,
-          entity: 'FlickrPhoto',
-          entityId: photoId,
-          createdBy: user.id,
-        });
-        console.log('History actualizado.');
-      } catch (error) {
-        console.error('Error al guardar el History:', error.message);
-      }
+      await saveToHistory(user, 'view', photoId, 'FlickrPhoto', photoId);
     }
 
     return formattedPhoto;
   } catch (error) {
     console.error('Error fetching photo from Flickr:', error.message);
     throw new Error('Failed to fetch photo from Flickr API');
+  }
+};
+
+/**
+ * Creates a Flickr API request configuration.
+ * @param {string} method - Flickr API method.
+ * @param {object} params - Query parameters.
+ * @returns {object} - Axios request configuration.
+ */
+const createFlickrConfig = (method, params) => ({
+  method: 'get',
+  url: BASE_FLICKR_URL,
+  headers: { 
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'User-Agent': 'NodeApp',
+  },
+  params: {
+    method,
+    api_key: FLICKR_API_KEY,
+    format: 'json',
+    nojsoncallback: 1,
+    ...params,
+  },
+});
+
+/**
+ * Saves data to Redis cache.
+ * @param {string} key - Cache key.
+ * @param {object} data - Data to cache.
+ * @param {number} expiration - Expiration time in seconds (default 10 minutes).
+ */
+const saveToCache = async (key, data, expiration = 600) => {
+  try {
+    await redisClient.set(key, JSON.stringify(data), { EX: expiration });
+    console.log('Cache updated:', key);
+  } catch (error) {
+    console.error('Error saving to Redis:', error.message);
+  }
+};
+
+/**
+ * Logs an action to the History model.
+ * @param {object} user - Authenticated user.
+ * @param {string} action - Action type (e.g., 'search', 'view').
+ * @param {object} value - Value being logged.
+ * @param {string} entity - Entity type (e.g., 'FlickrFeed').
+ * @param {number|null} entityId - Entity ID.
+ */
+const saveToHistory = async (user, action, value, entity, entityId) => {
+  try {
+    await History.create({
+      userId: user.id,
+      action,
+      value: JSON.stringify(value),
+      entity,
+      entityId,
+      createdBy: user.id,
+    });
+    console.log('History updated for user:', user.id);
+  } catch (error) {
+    console.error('Error saving to History:', error.message);
   }
 };
 
