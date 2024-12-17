@@ -2,7 +2,7 @@ const axios = require('axios');
 const { History } = require('../models'); // History model
 const redisClient = require('../config/redisConfig'); // Redis client
 
-const BASE_FLICKR_URL = process.env.FLICKR_BASE_URL;
+const FLICKR_API_URL = process.env.FLICKR_BASE_URL;
 const FLICKR_API_KEY = process.env.FLICKR_API_KEY;
 
 /**
@@ -148,7 +148,7 @@ const getFlickrPhotoById = async (photoId, user) => {
  */
 const createFlickrConfig = (method, params) => ({
   method: 'get',
-  url: BASE_FLICKR_URL,
+  url: FLICKR_API_URL,
   headers: { 
     'Content-Type': 'application/json',
     'Accept': 'application/json',
