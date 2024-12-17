@@ -30,7 +30,7 @@ const getFlickrFeed = async (queryParams, user) => {
   try {
     console.log('query params:', search, tags, sort, per_page, page);
     // Flickr API request configuration
-    const config = createFlickrConfig('flickr.photos.getRecent', {
+    const config = createFlickrConfig('flickr.photos.search', {
       sort,
       per_page,
       page,
